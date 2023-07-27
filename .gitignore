@@ -55,6 +55,6 @@ packages/
 TestResults/
 
 # Local configuration
-appsettings*.json
+
 
 AudioFiles/

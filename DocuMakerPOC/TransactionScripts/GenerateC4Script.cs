@@ -1,4 +1,5 @@
 using FFmpeg.NET;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using FileNotFoundException = System.IO.FileNotFoundException;
 
@@ -6,27 +7,30 @@ namespace DocuMakerPOC.TransactionScripts;
 
 public class GenerateC4Script
 {
-    private readonly string? OpenAiToken;
+    private readonly IDistributedCache _cache;
+    private readonly string? _openAiToken;
+    
     private const string SpeechToTextUrl = "https://api.openai.com/v1/audio/transcriptions";
     private const string SpeechToTextModel = "whisper-1";
     
     private const string AudioFolderName = "AudioFiles";
     private const string FfmpegPath = "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe";
 
-    public GenerateC4Script(IConfiguration configuration)
+    public GenerateC4Script(IConfiguration configuration, IDistributedCache cache)
     {
-        OpenAiToken = configuration["OpenAIToken"];
+        _cache = cache;
+        _openAiToken = configuration["OpenAIToken"];
     }
     
     public async Task<bool> RunAsync(string videoPath)
     {
         try
-        {
-            var audioDirectory = GetAudioPath(videoPath);
+        {   
+            var audioDirectory = CreateAudioDirectory(videoPath);
 
             await ExtractAudioAsync(videoPath, audioDirectory);
 
-            var transcription = await TranscriptAudioFile(audioDirectory);
+            var transcription = await GetTranscription(audioDirectory);
 
             //proccess??
 
@@ -40,7 +44,7 @@ public class GenerateC4Script
         }
     }
 
-    private string GetAudioPath(string videoPath)
+    private string CreateAudioDirectory(string videoPath)
     {
         var generalAudioDirectoryPath = Path.Combine(Directory.GetCurrentDirectory(), AudioFolderName);
 
@@ -66,11 +70,25 @@ public class GenerateC4Script
             default);
     }
 
+    private async Task<string> GetTranscription(string audioPath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(audioPath);
+
+        var cachedTranscription = await _cache.GetStringAsync(fileName);
+        if (cachedTranscription is not null) 
+            return cachedTranscription;
+        
+        var transcript = await TranscriptAudioFile(audioPath);
+        await _cache.SetStringAsync(fileName, transcript);
+        
+        return transcript;
+    }
+
     private async Task<string> TranscriptAudioFile(string audioPath)
     {
         using var httpClient = new HttpClient();
         
-        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {OpenAiToken}");
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_openAiToken}");
 
         using var formData = new MultipartFormDataContent();
         await using var fileStream = new FileStream(audioPath, FileMode.Open, FileAccess.Read);

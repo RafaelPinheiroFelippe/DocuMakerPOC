@@ -1,10 +1,5 @@
 using DocuMakerPOC.TransactionScripts;
-using Supabase;
-
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(AppContext.BaseDirectory)
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .Build();
+using Firebase.Database;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,22 +10,17 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-//Supabase
-builder.Services.AddSingleton(_ => new Client(
-    configuration["SupabaseUrl"],
-    configuration["SupabaseKey"],
-    new SupabaseOptions
-    {
-        AutoRefreshToken = true,
-        AutoConnectRealtime = true,
-        //SessionHandler = new SupabaseSessionHandler() <-- This must be implemented by the developer
-    }));
-
 //TransactionScripts
 builder.Services.AddTransient<GenerateC4Script>();
 
-//Redis
-builder.Services.AddStackExchangeRedisCache(options => { options.Configuration = "localhost:6379"; });
+//Firebase
+builder.Services.AddSingleton<FirebaseClient>(_ =>
+    new FirebaseClient(
+        builder.Configuration["Firebase:Path"],
+        new FirebaseOptions
+        {
+            AuthTokenAsyncFactory = () => Task.FromResult(builder.Configuration["Firebase:Auth"]) 
+        }));
 
 var app = builder.Build();
 

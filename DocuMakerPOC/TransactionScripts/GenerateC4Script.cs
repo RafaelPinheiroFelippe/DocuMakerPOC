@@ -1,20 +1,14 @@
-using DocuMakerPOC.Services.SemanticKernel;
 using FFmpeg.NET;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Options;
+using Firebase.Database;
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.SkillDefinition;
-using Microsoft.SemanticKernel.TemplateEngine;
-using NAudio.Wave;
-using Supabase;
+using Newtonsoft.Json;
 using static System.String;
 
 namespace DocuMakerPOC.TransactionScripts;
 
 public class GenerateC4Script
 {
-    private readonly IDistributedCache _cache;
-    private readonly Client _supabaseClient;
+    private readonly FirebaseClient _firebaseClient;
     private readonly string _openAiToken;
     private const string LlmModel = "gpt-3.5-turbo-16k";
 
@@ -24,11 +18,10 @@ public class GenerateC4Script
     private const string AudioFolderName = "AudioFiles";
     private const string FfmpegPath = "C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe";
 
-    public GenerateC4Script(IConfiguration configuration, IDistributedCache cache, Client supabaseClient)
+    public GenerateC4Script(IConfiguration configuration, FirebaseClient firebaseClient)
     {
-        _cache = cache;
-        _supabaseClient = supabaseClient;
-        _openAiToken = configuration["OpenAIToken"] ?? Empty;
+        _firebaseClient = firebaseClient;
+        _openAiToken = configuration["OpenAI:Auth"] ?? Empty;
     }
 
     private record AudioSlice(string Name, string Path, int Order);
@@ -41,6 +34,17 @@ public class GenerateC4Script
     {
         try
         {
+            //TODO implement transcription storage with firebase, create wrapper for deserialization 
+            var a = new
+            {
+                poggers = "aaaa"
+            };
+            
+            var test = await _firebaseClient
+                .Child("docs")
+                .PostAsync(JsonConvert.SerializeObject(a));
+            
+            
             var audioDirectory = CreateAudioDirectory(videoPath);
 
             var audioSlices = await ExtractAndSliceAudio(videoPath, audioDirectory);
@@ -51,7 +55,8 @@ public class GenerateC4Script
 
             var documentationChunks = await ProcessTranscriptions(transcriptions);
 
-            //generare structured docs
+            //var firebaseResult = await _firebaseClient.PushAsync("docs", documentationChunks);
+            //generate structured docs
 
             return true;
         }
@@ -205,7 +210,7 @@ Generate document based on the following transcription
         var inputFile = new InputFile(audioPath);
         var metadata = await engine.GetMetaDataAsync(inputFile, default);
         var totalDuration = metadata.Duration;
-        int segmentNumber = 1;
+        var segmentNumber = 1;
         for (var start = TimeSpan.Zero; start < totalDuration; start += TimeSpan.FromMinutes(minutesPerSegment))
         {
             var end = start + TimeSpan.FromMinutes(minutesPerSegment);
@@ -238,14 +243,12 @@ Generate document based on the following transcription
 
     private async Task<TranscriptionSlice> GetTranscription(AudioSlice audioSlice)
     {
-        var fileName = audioSlice.Name;
-
-        var cachedTranscription = await _cache.GetStringAsync(fileName);
-        if (cachedTranscription is not null)
-            return new TranscriptionSlice(audioSlice.Name, cachedTranscription, audioSlice.Order);
+        // var cachedTranscription = await _cache.GetStringAsync(fileName);
+        // if (cachedTranscription is not null)
+        //     return new TranscriptionSlice(audioSlice.Name, cachedTranscription, audioSlice.Order);
 
         var transcription = await TranscriptAudioFile(audioSlice.Path);
-        await _cache.SetStringAsync(fileName, transcription);
+        //await _cache.SetStringAsync(fileName, transcription);
 
         return new TranscriptionSlice(audioSlice.Name, transcription, audioSlice.Order);
     }

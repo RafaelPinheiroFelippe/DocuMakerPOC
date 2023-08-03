@@ -1,3 +1,4 @@
+using DocuMakerPOC.DTOs;
 using DocuMakerPOC.TransactionScripts;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,17 +8,19 @@ namespace DocuMakerPOC.Controllers;
 [Route("Video")]
 public class VideoController : ControllerBase
 {
-    private readonly GenerateC4Script _generateC4Script;
+    private readonly GenerateDocsFromVideoScript _generateDocsFromVideoScript;
 
-    public VideoController(GenerateC4Script generateC4Script)
+    public VideoController(GenerateDocsFromVideoScript generateDocsFromVideoScript)
     {
-        _generateC4Script = generateC4Script;
+        _generateDocsFromVideoScript = generateDocsFromVideoScript;
     }
 
-    [HttpPost("{videoPath}", Name = "Vid2C4")]
-    public async Task<IActionResult> Vid2C4(string videoPath)
+    [HttpPost(Name = "Vid2Docs")]
+    public async Task<IActionResult> Vid2Docs(
+        [FromBody] GenerateDocsFromVideoDTO dto
+        )
     {
-        return await _generateC4Script.RunAsync(videoPath)
+        return await _generateDocsFromVideoScript.RunAsync(dto)
             ? Ok()
             : Problem("Generation Failed");
     }

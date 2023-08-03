@@ -11,7 +11,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 //TransactionScripts
-builder.Services.AddTransient<GenerateC4Script>();
+builder.Services.AddTransient<GenerateDocsFromVideoScript>();
 
 //Firebase
 builder.Services.AddSingleton<FirebaseClient>(_ =>

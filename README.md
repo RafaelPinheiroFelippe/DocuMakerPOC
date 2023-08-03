@@ -1,6 +1,6 @@
 # DocuMakerPOC
 ## Introduction
-Welcome to DocuMakerPOC, a proof-of-concept application built with .NET Core, demonstrating an innovative pipeline for video processing and documentation generation.
+Welcome to DocuMakerPOC, a proof-of-concept application built with .NET 7, demonstrating an innovative pipeline for video processing and documentation generation.
 
 This project explores the capabilities of modern AI technologies, focusing on the conversion of video content into structured documents. The main goal of the POC is to explore, learn, and validate the potential of these technologies for practical application scenarios.
 

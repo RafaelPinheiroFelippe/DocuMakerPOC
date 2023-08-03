@@ -5,6 +5,8 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);1591</NoWarn>
         <UserSecretsId>cf82f634-86fe-417f-8314-c40f8e9e467d</UserSecretsId>
     </PropertyGroup>
 
@@ -47,5 +49,6 @@
       <_ContentIncludedByDefault Remove="Services\SemanticKernel\Skills\SummarizeSkill\Summarize\config.json" />
       <_ContentIncludedByDefault Remove="Services\SemanticKernel\Skills\SummarizeSkill\Topics\config.json" />
     </ItemGroup>
+
 
 </Project>

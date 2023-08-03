@@ -1,4 +1,5 @@
 using DocuMakerPOC.DTOs;
+using DocuMakerPOC.Prompts;
 using FFmpeg.NET;
 using Firebase.Database;
 using Firebase.Database.Query;
@@ -11,6 +12,9 @@ public class GenerateDocsFromVideoScript
 {
     private readonly FirebaseClient _firebaseClient;
     private readonly string _openAiToken;
+    private GenerateDocsFromVideoPrompts? _prompts;
+    private string _fileName;
+    private readonly IKernel _kernel;
     private const string LlmModel = "gpt-3.5-turbo-16k";
 
     private const string SpeechToTextUrl = "https://api.openai.com/v1/audio/transcriptions";
@@ -30,6 +34,10 @@ public class GenerateDocsFromVideoScript
     {
         _firebaseClient = firebaseClient;
         _openAiToken = configuration["OpenAI:Auth"] ?? Empty;
+
+        _kernel = Kernel.Builder
+            .WithOpenAIChatCompletionService(LlmModel, _openAiToken)
+            .Build();
     }
 
     private record AudioSlice(string Name, string Path, int Order);
@@ -40,29 +48,58 @@ public class GenerateDocsFromVideoScript
 
     public async Task<bool> RunAsync(GenerateDocsFromVideoDTO dto)
     {
-        var fileName = Path.GetFileNameWithoutExtension(dto.videoPath);
+        _prompts = dto.Prompts ?? new GenerateDocsFromVideoPrompts();
 
-        var transcriptions = await GetTranscriptionsFromFirebase(fileName);
+        _fileName = Path.GetFileNameWithoutExtension(dto.VideoPath);
+
+        var transcriptions = await GetTranscriptionsFromFirebase(_fileName);
 
         if (!transcriptions.Any())
         {
-            var audioDirectory = CreateAudioDirectory(dto.videoPath);
-            
-            var audioSlices = await ExtractAndSliceAudio(dto.videoPath, audioDirectory);
+            var audioDirectory = CreateAudioDirectory(dto.VideoPath);
 
-            transcriptions = await GenerateTranscriptions(fileName, audioSlices);
+            var audioSlices = await ExtractAndSliceAudio(dto.VideoPath, audioDirectory);
+
+            transcriptions = await GenerateTranscriptions(_fileName, audioSlices);
         }
-        
-        //TODO var processedTranscriptions = await GenerateProcessedTranscriptions(fileName, audioSlices);
 
-        var documentationChunks = await GenerateFinalDocs(transcriptions);
+        var processedTranscriptions = await GenerateProcessedTranscriptions(transcriptions);
+
+        var documentationChunks = await GenerateFinalDocs(processedTranscriptions);
 
         await _firebaseClient
             .Child("finalDocs")
-            .Child(fileName)
+            .Child(_fileName)
             .PutAsync(documentationChunks);
 
         return true;
+    }
+
+    private async Task<List<TranscriptionSlice>> GenerateProcessedTranscriptions(
+        List<TranscriptionSlice> transcriptions)
+    {
+        //todo implement
+
+        var processedTranscriptions = new List<TranscriptionSlice>();
+        foreach (var transcription in transcriptions)
+        {
+            var improveTranscriptionPrompt = $"""
+                                                 {GeneralRulesPrompt}
+                                                 {_prompts.ImproveTranscription.Replace("{transcription}", transcription.Content)}
+                                                 """;
+
+            var transcriptionToDocumentSkill =
+                _kernel.CreateSemanticFunction(
+                    improveTranscriptionPrompt,
+                    maxTokens: 11000, temperature: 0.0, topP: 1);
+
+            var transcriptionToDocument =
+                await transcriptionToDocumentSkill.InvokeAsync();
+
+            processedTranscriptions.Add(transcription with { Content = transcriptionToDocument.Result });
+        }
+
+        return processedTranscriptions;
     }
 
     private async Task<List<TranscriptionSlice>> GetTranscriptionsFromFirebase(string fileName)
@@ -80,10 +117,6 @@ public class GenerateDocsFromVideoScript
     {
         var tableOfContents = Empty;
 
-        var kernel = Kernel.Builder
-            .WithOpenAIChatCompletionService(LlmModel, _openAiToken)
-            .Build();
-
         var documentChunks = new List<DocumentChunk>();
         foreach (var currentSlice in transcriptionSlices)
         {
@@ -93,10 +126,10 @@ public class GenerateDocsFromVideoScript
                 GenerateOverlappingTranscription(transcriptionSlices, currentSlice, overlapCharactersCount);
 
             var transcriptionDocument
-                = await GenerateDocumentFromTranscription(kernel, overlappingTranscription);
+                = await GenerateDocumentFromTranscription(overlappingTranscription);
 
             tableOfContents =
-                await IncrementTableOfContentsFromDocument(kernel, tableOfContents, transcriptionDocument);
+                await IncrementTableOfContentsFromDocument(tableOfContents, transcriptionDocument);
 
             documentChunks.Add(new DocumentChunk(
                 currentSlice.Name,
@@ -109,7 +142,7 @@ public class GenerateDocsFromVideoScript
         return documentChunks;
     }
 
-    private static async Task<string> IncrementTableOfContentsFromDocument(IKernel kernel, string tableOfContents,
+    private async Task<string> IncrementTableOfContentsFromDocument(string tableOfContents,
         string transcriptionDocument)
     {
         var functionDefinition = $"""
@@ -135,7 +168,7 @@ public class GenerateDocsFromVideoScript
                                   """;
 
         var documentToTableOfContentsSkill =
-            kernel.CreateSemanticFunction(functionDefinition, maxTokens: 11000, temperature: 0.0, topP: 1);
+            _kernel.CreateSemanticFunction(functionDefinition, maxTokens: 11000, temperature: 0.0, topP: 1);
 
         var documentToTableOfContents =
             await documentToTableOfContentsSkill.InvokeAsync();
@@ -167,25 +200,17 @@ public class GenerateDocsFromVideoScript
         return overlappingTranscription;
     }
 
-    private static async Task<string> GenerateDocumentFromTranscription(IKernel kernel, string transcription)
+    private async Task<string> GenerateDocumentFromTranscription(string transcription)
     {
-        // TODO return in portuguese
-        var functionDefinition = $"""
-                                  {GeneralRulesPrompt}
-                                  [GENERATION RULES]
-                                  GENERATE A DOCUMENT WITH THE TRANSCRIPTIONS CONTENT
-                                  BE ORGANIZED AND CONCISE
-                                  YOU WILL RECEIVE THE TRANSCRIPTION IN PLAIN TEXT, IT IS ONLY A CHUNK OF A FULL TRANSCRIPTION
-                                  IGNORE CONTENTS OF THE TRANSCRIPTION THAT DONT FIT IN A DOCUMENTATION, FOR EXAMPLE IF YOU RECEIVE A TRANSCRIPTION OF SOMEONE DESCRIBING HOW A SOFTWARE WORKS, IGNORE JOKES, UNRELATED COMMENTARIES, ETC
-                                  RETURN THE DOCUMENT IN MARKDOWN (.md) FORMAT
-
-                                  Generate document in PT-BR based on the following transcription
-                                  {transcription}
-                                  +++++
-                                  """;
+        var transcriptionToDocumentPrompt = $"""
+                                             {GeneralRulesPrompt}
+                                             {_prompts.TranscriptionToDocument.Replace("{transcription}", transcription)}
+                                             """;
 
         var transcriptionToDocumentSkill =
-            kernel.CreateSemanticFunction(functionDefinition, maxTokens: 11000, temperature: 0.0, topP: 1);
+            _kernel.CreateSemanticFunction(
+                transcriptionToDocumentPrompt,
+                maxTokens: 11000, temperature: 0.0, topP: 1);
 
         var transcriptionToDocument =
             await transcriptionToDocumentSkill.InvokeAsync();
@@ -197,8 +222,7 @@ public class GenerateDocsFromVideoScript
     {
         var generalAudioDirectoryPath = Path.Combine(Directory.GetCurrentDirectory(), AudioFolderName);
 
-        var videoFileName = Path.GetFileNameWithoutExtension(videoPath);
-        var currentAudioDirectoryPath = Path.Combine(generalAudioDirectoryPath, videoFileName);
+        var currentAudioDirectoryPath = Path.Combine(generalAudioDirectoryPath, _fileName);
 
         Directory.CreateDirectory(currentAudioDirectoryPath);
 
@@ -209,12 +233,12 @@ public class GenerateDocsFromVideoScript
 
     private async Task<string> ExtractAudioAsync(string videoPath, string audioDirectory)
     {
-        var audioPath = Path.Combine(audioDirectory, $"{Path.GetFileNameWithoutExtension(videoPath)}.mp3");
+        var audioPath = Path.Combine(audioDirectory, $"{_fileName}.mp3");
 
         var ffmpeg = new Engine(FfmpegPath);
         var inputFile = new InputFile(videoPath);
         var outputFile =
-            new OutputFile(Path.Combine(audioDirectory, $"{Path.GetFileNameWithoutExtension(videoPath)}.mp3"));
+            new OutputFile(Path.Combine(audioDirectory, $"{_fileName}.mp3"));
 
         await ffmpeg.ConvertAsync(inputFile,
             outputFile,
@@ -245,7 +269,7 @@ public class GenerateDocsFromVideoScript
                 end = totalDuration;
             }
 
-            var sliceName = $"{Path.GetFileNameWithoutExtension(videoFilePath)}_{segmentNumber}.mp3";
+            var sliceName = $"{_fileName}_{segmentNumber}.mp3";
             var outputPath = Path.Combine(outputFolderPath, sliceName);
 
             var options = new ConversionOptions
